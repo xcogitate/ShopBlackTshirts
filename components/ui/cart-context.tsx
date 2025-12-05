@@ -16,6 +16,7 @@ export type CartItem = {
   name: string
   price: number
   originalPrice?: number
+  limited?: boolean
   image?: string | null
   slug: string
   qty: number
@@ -32,6 +33,7 @@ export type CartState = {
   discountAmount: number
   discountedSubtotal: number
   discountMode: "rate" | "label" | null
+  siteDiscounts: { nonLimitedRate: number; limitedActive: boolean }
 }
 
 export interface CartContextValue extends CartState {
@@ -53,6 +55,7 @@ export interface CartContextValue extends CartState {
   open: () => void
   close: () => void
   toggle: () => void
+  siteDiscounts: { nonLimitedRate: number; limitedActive: boolean }
 }
 
 /** ---------- Context ---------- */
@@ -72,6 +75,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([])
   const [discount, setDiscount] = useState<{ rate: number; source?: string | null; mode?: "rate" | "label" } | null>(null)
   const [isOpen, setIsOpen] = useState(false)
+  const [siteDiscount, setSiteDiscount] = useState<{ nonLimitedRate: number; limitedActive: boolean }>({
+    nonLimitedRate: 0,
+    limitedActive: false,
+  })
 
   // hydrate from localStorage
   useEffect(() => {
@@ -108,6 +115,29 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     isHydrated.current = true
   }, [])
 
+  // load site-wide discounts (coupon + limited drop)
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const response = await fetch("/api/site-settings")
+        const data = (await response.json().catch(() => null)) as {
+          coupon?: { discountPercent?: number; enableForNonLimited?: boolean | null }
+          countdown?: { enabled?: boolean; endsAt?: string | null }
+        } | null
+        if (!data) return
+        const nonLimitedRate =
+          data.coupon && data.coupon.enableForNonLimited && typeof data.coupon.discountPercent === "number"
+            ? Math.max(0, Math.min(1, data.coupon.discountPercent / 100))
+            : 0
+        const limitedActive = Boolean(data.countdown && data.countdown.enabled && data.countdown.endsAt)
+        setSiteDiscount({ nonLimitedRate, limitedActive })
+      } catch (err) {
+        console.warn("[cart] unable to load site discount settings", err)
+      }
+    }
+    loadSettings().catch(() => null)
+  }, [])
+
   // derived totals
   const state: CartState = useMemo(() => {
     const subtotal = items.reduce((sum, i) => sum + i.price * i.qty, 0)
@@ -117,27 +147,42 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     )
     const count = items.reduce((sum, i) => sum + i.qty, 0)
 
+    const nonLimitedSubtotal = items
+      .filter((i) => !i.limited)
+      .reduce((sum, i) => sum + i.price * i.qty, 0)
+    const limitedSubtotal = items
+      .filter((i) => i.limited)
+      .reduce((sum, i) => sum + i.price * i.qty, 0)
+
     let discountAmount = 0
     let discountRate = 0
-    let discountedSubtotal = subtotal
 
+    // Site-wide automatic discounts
+    const siteAmount =
+      Math.round(nonLimitedSubtotal * siteDiscount.nonLimitedRate * 100) / 100
+    discountAmount += siteAmount
+
+    let workingSubtotal = Math.max(0, subtotal - siteAmount)
+
+    // User-triggered discounts (e.g., signup)
+    let manualAmount = 0
     if (discount) {
       if (discount.mode === "label") {
         const labelAmount = Math.max(0, originalSubtotal - subtotal)
         if (labelAmount > 0) {
-          discountAmount = Math.round(labelAmount * 100) / 100
-          discountRate = originalSubtotal > 0 ? discountAmount / originalSubtotal : 0
-          discountedSubtotal = subtotal
+          manualAmount = Math.round(labelAmount * 100) / 100
         }
       } else {
         const normalizedRate = Math.max(0, Math.min(discount.rate ?? 0, 1))
         if (normalizedRate > 0) {
-          discountRate = normalizedRate
-          discountAmount = Math.round(subtotal * normalizedRate * 100) / 100
-          discountedSubtotal = Math.max(0, subtotal - discountAmount)
+          manualAmount = Math.round(workingSubtotal * normalizedRate * 100) / 100
         }
       }
     }
+
+    discountAmount += manualAmount
+    const discountedSubtotal = Math.max(0, workingSubtotal - manualAmount)
+    discountRate = subtotal > 0 ? discountAmount / subtotal : 0
 
     return {
       items,
@@ -148,8 +193,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       discountAmount,
       discountedSubtotal,
       discountMode: discount?.mode ?? null,
+      siteDiscounts: siteDiscount,
     }
-  }, [items, discount])
+  }, [items, discount, siteDiscount])
 
   // persist to localStorage
   useEffect(() => {
@@ -200,10 +246,19 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           image: item.image ?? next[idx].image,
           name: item.name ?? next[idx].name,
           slug: item.slug ?? next[idx].slug,
+          limited: item.limited ?? next[idx].limited,
         }
         return next
       }
-      return [...prev, { ...item, originalPrice: item.originalPrice ?? item.price, qty }]
+      return [
+        ...prev,
+        {
+          ...item,
+          limited: item.limited ?? false,
+          originalPrice: item.originalPrice ?? item.price,
+          qty,
+        },
+      ]
     })
     setIsOpen(true)
   }
@@ -274,6 +329,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     open,
     close,
     toggle,
+    siteDiscounts: state.siteDiscounts,
   }
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>

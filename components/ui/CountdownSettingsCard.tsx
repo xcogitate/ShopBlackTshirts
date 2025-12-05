@@ -55,23 +55,23 @@ export default function CountdownSettingsCard() {
       const response = await fetch("/api/admin/site-settings", {
         headers: { Authorization: `Bearer ${token}` },
       })
-      const data = (await response.json().catch(() => null)) as {
-        countdown?: { enabled?: boolean; label?: string | null; endsAt?: string | null }
-        error?: string
-      } | null
-      if (!response.ok) {
-        throw new Error(data?.error ?? "Unable to load countdown settings.")
-      }
-      const countdown = data?.countdown ?? {}
-      setForm({
-        enabled: Boolean(countdown.enabled),
-        label: countdown.label ?? FALLBACK_LABEL,
-        endsAtLocal: formatInputValue(countdown.endsAt),
-      })
-    } catch (fetchError) {
-      const message =
-        fetchError instanceof Error ? fetchError.message : "Unable to load countdown settings."
-      setError(message)
+        const data = (await response.json().catch(() => null)) as {
+          countdown?: { enabled?: boolean; label?: string | null; endsAt?: string | null }
+          error?: string
+        } | null
+        if (!response.ok) {
+          throw new Error(data?.error ?? "Unable to load countdown settings.")
+        }
+        const countdown = data?.countdown ?? {}
+        setForm({
+          enabled: Boolean(countdown.enabled),
+          label: countdown.label ?? FALLBACK_LABEL,
+          endsAtLocal: countdown.enabled ? formatInputValue(countdown.endsAt) : "",
+        })
+      } catch (fetchError) {
+        const message =
+          fetchError instanceof Error ? fetchError.message : "Unable to load countdown settings."
+        setError(message)
     } finally {
       setLoading(false)
     }
@@ -89,7 +89,7 @@ export default function CountdownSettingsCard() {
       return
     }
 
-    const endsAtIso = form.endsAtLocal ? inputToIso(form.endsAtLocal) : null
+    const endsAtIso = form.enabled ? (form.endsAtLocal ? inputToIso(form.endsAtLocal) : null) : null
     if (form.enabled && !endsAtIso) {
       setError("Provide a valid date/time for when the countdown ends.")
       return

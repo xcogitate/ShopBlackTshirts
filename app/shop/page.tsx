@@ -26,6 +26,7 @@ export default function ShopPage() {
   const [expandedCollections, setExpandedCollections] = useState<Record<string, boolean>>({})
   const { products, status } = useStorefrontProducts()
   const hasProducts = products.length > 0
+  const isLoading = status === "loading"
 
   const toggleCollection = (key: string) => {
     setExpandedCollections((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -98,45 +99,68 @@ export default function ShopPage() {
 
       <main className="px-6 py-12">
         <div className="mx-auto max-w-7xl space-y-16">
-          {collections.map(({ key, title }) => {
-            const matchingProducts = products.filter((product) => product.categories.includes(key))
-            if (!matchingProducts.length) return null
+          {isLoading && (
+            <section className="space-y-4">
+              <div className="grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {Array.from({ length: 4 }).map((_, idx) => (
+                  <div
+                    key={idx}
+                    className="h-80 animate-pulse rounded-2xl border border-white/10 bg-white/5"
+                  />
+                ))}
+              </div>
+            </section>
+          )}
 
-            const isExpanded = Boolean(expandedCollections[key])
-            const visibleProducts = isExpanded ? matchingProducts : matchingProducts.slice(0, 4)
-            const showToggle = matchingProducts.length > 4
+          {!isLoading &&
+            collections.map(({ key, title }) => {
+              const matchingProducts = products.filter((product) => product.categories.includes(key))
+              if (!matchingProducts.length) return null
 
-            return (
-              <section key={key} className="space-y-8">
-                <div className="flex items-baseline justify-between">
-                  <h2 className="text-2xl font-semibold">{title}</h2>
-                  {showToggle && (
-                    <button
-                      type="button"
-                      onClick={() => toggleCollection(key)}
-                      className="text-sm font-semibold text-[#F5A623] transition hover:text-[#E09612]"
-                      aria-expanded={isExpanded}
-                      aria-controls={`collection-${key}`}
-                    >
-                      {isExpanded ? "Show less" : "View collection"}
-                    </button>
-                  )}
-                </div>
-                <div
-                  id={`collection-${key}`}
-                  className="grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-                >
-                  {visibleProducts.map((product) => (
-                    <ProductCard key={product.id} product={product} />
-                  ))}
-                </div>
-              </section>
-            )
-          })}
+              const isExpanded = Boolean(expandedCollections[key])
+              const visibleProducts = isExpanded ? matchingProducts : matchingProducts.slice(0, 4)
+              const showToggle = matchingProducts.length > 4
+
+              return (
+                <section key={key} className="space-y-8">
+                  <div className="flex items-baseline justify-between">
+                    <h2 className="text-2xl font-semibold">{title}</h2>
+                    {showToggle && (
+                      <button
+                        type="button"
+                        onClick={() => toggleCollection(key)}
+                        className="text-sm font-semibold text-[#F5A623] transition hover:text-[#E09612]"
+                        aria-expanded={isExpanded}
+                        aria-controls={`collection-${key}`}
+                      >
+                        {isExpanded ? "Show less" : "View collection"}
+                      </button>
+                    )}
+                  </div>
+                  <div
+                    id={`collection-${key}`}
+                    className="grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+                  >
+                    {visibleProducts.map((product) => (
+                      <ProductCard key={product.id} product={product} />
+                    ))}
+                  </div>
+                </section>
+              )
+            })}
 
           <section className="space-y-8">
             <h2 className="text-2xl font-semibold">All Designs</h2>
-            {hasProducts ? (
+            {isLoading ? (
+              <div className="grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {Array.from({ length: 8 }).map((_, idx) => (
+                  <div
+                    key={idx}
+                    className="h-80 animate-pulse rounded-2xl border border-white/10 bg-white/5"
+                  />
+                ))}
+              </div>
+            ) : hasProducts ? (
               <div className="grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {products.map((product) => (
                   <ProductCard key={product.id} product={product} />

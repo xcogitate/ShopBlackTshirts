@@ -185,7 +185,7 @@ export default function ProductDetailPage() {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const slugParam = searchParams.get("slug") ?? null
-  const { addItem } = useCart()
+  const { addItem, siteDiscounts } = useCart()
   const { products: storefrontProducts } = useStorefrontProducts()
   const [buying, setBuying] = useState(false)
   const [buyError, setBuyError] = useState<string | null>(null)
@@ -278,13 +278,22 @@ export default function ProductDetailPage() {
     thumbnailImages.push(galleryImages[0] ?? selectedProduct.image)
   }
 
-  const discount =
-    selectedProduct.originalPrice > selectedProduct.price
-      ? Math.max(
-          0,
-          Math.round(((selectedProduct.originalPrice - selectedProduct.price) / selectedProduct.originalPrice) * 100),
-        )
-      : 0
+  const computeEffectivePrice = (product: typeof selectedProduct) => {
+    const baseOriginal = Number(product.originalPrice ?? product.price ?? 0)
+    const basePrice = Number(product.price ?? baseOriginal)
+    const rate = product.limited ? siteDiscounts.limitedRate : siteDiscounts.nonLimitedRate
+    const displayBase =
+      product.limited && rate === 0 && baseOriginal > 0 ? baseOriginal : basePrice
+    const effective =
+      rate > 0 ? Math.max(0, Math.round(displayBase * (1 - rate) * 100) / 100) : displayBase
+    const percent =
+      rate > 0 && baseOriginal > 0
+        ? Math.max(0, Math.round(((baseOriginal - effective) / baseOriginal) * 100))
+        : 0
+    return { effective, original: baseOriginal, percent }
+  }
+
+  const pricing = computeEffectivePrice(selectedProduct)
 
   const featureList = selectedProduct.features?.length ? selectedProduct.features : defaultFeatureList
 
@@ -303,10 +312,11 @@ export default function ProductDetailPage() {
     addItem({
       id: `${selectedProduct.slug}${sizeSuffix}`,
       name: productName,
-      price: selectedProduct.price,
-      originalPrice: selectedProduct.originalPrice,
+      price: pricing.effective,
+      originalPrice: pricing.original,
       image: activeImage,
       slug: selectedProduct.slug,
+      limited: selectedProduct.limited,
     })
   }
 
@@ -318,7 +328,7 @@ export default function ProductDetailPage() {
     const productName = selectedSize ? `${selectedProduct.name} (${selectedSize})` : selectedProduct.name
 
     const { error } = await startCheckout([
-      { id: `${selectedProduct.slug}${sizeSuffix}`, name: productName, price: selectedProduct.price, quantity: 1, image: activeImage },
+      { id: `${selectedProduct.slug}${sizeSuffix}`, name: productName, price: pricing.effective, quantity: 1, image: activeImage },
     ])
 
     if (error) {
@@ -404,12 +414,16 @@ export default function ProductDetailPage() {
                     {selectedProduct.name}
                   </h1>
                   <div className="flex flex-wrap items-center gap-4">
-                    <span className="text-3xl font-bold text-white">{formatCurrency(selectedProduct.price)}</span>
-                    <span className="text-xl text-gray-400 line-through">
-                      {formatCurrency(selectedProduct.originalPrice)}
-                    </span>
-                    {discount > 0 && (
-                      <span className="rounded-full bg-red-600 px-3 py-1 text-sm font-bold text-white">{discount}% OFF</span>
+                    <span className="text-3xl font-bold text-white">{formatCurrency(pricing.effective)}</span>
+                    {pricing.percent > 0 && (
+                      <>
+                        <span className="text-xl text-gray-400 line-through">
+                          {formatCurrency(pricing.original)}
+                        </span>
+                        <span className="rounded-full bg-red-600 px-3 py-1 text-sm font-bold text-white">
+                          {pricing.percent}% OFF
+                        </span>
+                      </>
                     )}
                   </div>
                   <p className="text-gray-300">{selectedProduct.description}</p>

@@ -20,6 +20,7 @@ import {
 } from "lucide-react"
 
 import AdminSignInForm from "@/components/ui/AdminSignInForm"
+import AbandonedCartsSection from "@/components/admin/AbandonedCarts"
 import ProductDraftForm, { type AdminProduct } from "@/components/ui/ProductDraftForm"
 import ProductPreviewList from "@/components/ui/ProductPreviewList"
 import CountdownSettingsCard from "@/components/ui/CountdownSettingsCard"
@@ -114,6 +115,7 @@ type SectionKey =
   | "analytics"
   | "coupons"
   | "support"
+  | "abandoned"
 
 type StoreTab = "limited-drop" | "new-arrival" | "you-matter" | "purpose-faith" | "street-icon"
 type OrderAction = "accept" | "ship" | "cancel" | "delete"
@@ -129,6 +131,7 @@ const navItems: Array<{ key: SectionKey; label: string; icon: ComponentType<{ cl
   { key: "analytics", label: "Analytics", icon: BarChart3 },
   { key: "coupons", label: "Coupon Generation", icon: TicketPercent },
   { key: "support", label: "Support Inbox", icon: LifeBuoy },
+  { key: "abandoned", label: "Abandoned Carts", icon: Layers3 },
 ]
 
 const storeCollections: { key: StoreTab; label: string; description: string }[] = [
@@ -232,6 +235,15 @@ export default function AdminPage() {
   const [selectedTraffic, setSelectedTraffic] = useState<string | null>(null)
   const [orderSearch, setOrderSearch] = useState("")
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set())
+  const [couponForm, setCouponForm] = useState({
+    code: "",
+    discountPercent: "0",
+    notes: "",
+    enableForNonLimited: false,
+  })
+  const [couponError, setCouponError] = useState<string | null>(null)
+  const [couponSaving, setCouponSaving] = useState(false)
+  const [couponLoading, setCouponLoading] = useState(false)
   const handlePresetChange = useCallback(
     (preset: RangePreset) => {
       const end = new Date()
@@ -249,6 +261,49 @@ export default function AdminPage() {
     },
     [],
   )
+
+  const loadCouponSettings = useCallback(async () => {
+    setCouponLoading(true)
+    setCouponError(null)
+    try {
+      const authToken = await getFreshIdToken()
+      if (!authToken) {
+        throw new Error("Sign in to load coupon settings.")
+      }
+      const response = await fetch("/api/admin/site-settings", {
+        headers: { Authorization: `Bearer ${authToken}` },
+      })
+      const data = (await response.json().catch(() => null)) as {
+        coupon?: { code?: string | null; discountPercent?: number; notes?: string | null; enableForNonLimited?: boolean }
+        error?: string
+      } | null
+      if (!response.ok || !data) {
+        throw new Error(data?.error ?? "Unable to load coupon settings.")
+      }
+      const coupon = data.coupon ?? {}
+      setCouponForm({
+        code: coupon.code ?? "",
+        discountPercent:
+          typeof coupon.discountPercent === "number"
+            ? String(Math.max(0, Math.min(100, coupon.discountPercent)))
+            : "0",
+        notes: coupon.notes ?? "",
+        enableForNonLimited: Boolean(coupon.enableForNonLimited),
+      })
+    } catch (couponLoadError) {
+      const message =
+        couponLoadError instanceof Error
+          ? couponLoadError.message
+          : "Unable to load coupon settings."
+      setCouponError(message)
+    } finally {
+      setCouponLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadCouponSettings()
+  }, [loadCouponSettings])
 
   const rangeBounds = useMemo(() => {
     let startDate = rangeStart ? new Date(`${rangeStart}T00:00:00`) : null
@@ -280,6 +335,63 @@ export default function AdminPage() {
       end: endDate ?? new Date(),
     }
   }, [rangeStart, rangeEnd])
+
+  const handleSaveCoupon = async () => {
+    setCouponError(null)
+    const discountValue = Number(couponForm.discountPercent)
+    if (Number.isNaN(discountValue) || discountValue < 0 || discountValue > 100) {
+      setCouponError("Enter a discount between 0 and 100.")
+      return
+    }
+    try {
+      setCouponSaving(true)
+      const authToken = await getFreshIdToken()
+      if (!authToken) {
+        throw new Error("Sign in to save coupon settings.")
+      }
+      const response = await fetch("/api/admin/site-settings", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          coupon: {
+            code: couponForm.code.trim() || null,
+            discountPercent: discountValue,
+            notes: couponForm.notes.trim() || null,
+            enableForNonLimited: couponForm.enableForNonLimited,
+          },
+        }),
+      })
+      const data = (await response.json().catch(() => null)) as {
+        coupon?: { code?: string | null; discountPercent?: number; notes?: string | null; enableForNonLimited?: boolean }
+        error?: string
+      } | null
+      if (!response.ok || !data?.coupon) {
+        throw new Error(data?.error ?? "Unable to save coupon settings.")
+      }
+      setCouponForm({
+        code: data.coupon.code ?? "",
+        discountPercent:
+          typeof data.coupon.discountPercent === "number"
+            ? String(Math.max(0, Math.min(100, data.coupon.discountPercent)))
+            : "0",
+        notes: data.coupon.notes ?? "",
+        enableForNonLimited: Boolean(data.coupon.enableForNonLimited),
+      })
+      toast({
+        title: "Coupon saved",
+        description: "Automatic discounts will apply based on your selections.",
+      })
+    } catch (saveError) {
+      const message =
+        saveError instanceof Error ? saveError.message : "Unable to save coupon settings."
+      setCouponError(message)
+    } finally {
+      setCouponSaving(false)
+    }
+  }
 
   const analyticsOrders = useMemo(() => {
     const { start, end } = rangeBounds
@@ -1556,27 +1668,86 @@ export default function AdminPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-semibold text-white">Coupon generation</h1>
-        <p className="text-sm text-gray-400">Create discount codes for loyalty campaigns.</p>
+        <p className="text-sm text-gray-400">
+          Save a site-wide coupon for non-limited products. Limited drops stay controlled by the countdown.
+        </p>
       </div>
       <Card className="border-neutral-900 bg-neutral-950">
         <CardHeader>
           <CardTitle>Generate coupon</CardTitle>
-          <CardDescription>Simulate coupon creation before wiring it to your backend.</CardDescription>
+          <CardDescription>Automatically applied to all non-limited products when enabled.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3">
             <label className="text-sm font-medium text-gray-300">Code</label>
-            <Input placeholder="BLACK-FRIDAY-25" className="bg-neutral-900" />
+            <Input
+              placeholder="BLACK-FRIDAY-25"
+              className="bg-neutral-900"
+              value={couponForm.code}
+              onChange={(event) => setCouponForm((prev) => ({ ...prev, code: event.target.value }))}
+              disabled={couponSaving || couponLoading}
+            />
           </div>
           <div className="grid gap-3">
             <label className="text-sm font-medium text-gray-300">Discount (%)</label>
-            <Input type="number" min="0" max="100" placeholder="25" className="bg-neutral-900" />
+            <Input
+              type="number"
+              min="0"
+              max="100"
+              step="0.5"
+              placeholder="25"
+              className="bg-neutral-900"
+              value={couponForm.discountPercent}
+              onChange={(event) =>
+                setCouponForm((prev) => ({ ...prev, discountPercent: event.target.value }))
+              }
+              disabled={couponSaving || couponLoading}
+            />
           </div>
           <div className="grid gap-3">
             <label className="text-sm font-medium text-gray-300">Notes</label>
-            <Textarea rows={3} placeholder="Internal notes for this campaign." />
+            <Textarea
+              rows={3}
+              placeholder="Internal notes for this campaign."
+              value={couponForm.notes}
+              onChange={(event) => setCouponForm((prev) => ({ ...prev, notes: event.target.value }))}
+              disabled={couponSaving || couponLoading}
+            />
           </div>
-          <Button className="bg-[#F5A623] text-black hover:bg-[#E09612]">Generate placeholder</Button>
+          <label className="flex items-center gap-3 text-sm text-gray-300">
+            <input
+              type="checkbox"
+              className="h-4 w-4 rounded border-white/30 bg-neutral-900 text-[#F5A623]"
+              checked={couponForm.enableForNonLimited}
+              onChange={(event) =>
+                setCouponForm((prev) => ({ ...prev, enableForNonLimited: event.target.checked }))
+              }
+              disabled={couponSaving || couponLoading}
+            />
+            Enable coupon for non-limited collections
+          </label>
+          {couponError && <p className="text-sm text-red-400">{couponError}</p>}
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              className="bg-[#F5A623] text-black hover:bg-[#E09612]"
+              onClick={handleSaveCoupon}
+              disabled={couponSaving}
+            >
+              {couponSaving ? "Saving..." : "Save coupon"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={couponSaving}
+              onClick={() => loadCouponSettings()}
+            >
+              Refresh
+            </Button>
+          </div>
+          <p className="text-xs text-gray-500">
+            Coupons apply automatically to all non-limited products. Limited drops stay controlled by the countdown and
+            its discount setting.
+          </p>
         </CardContent>
       </Card>
     </div>
@@ -1744,6 +1915,8 @@ export default function AdminPage() {
         return renderCoupons()
       case "support":
         return renderSupport()
+      case "abandoned":
+        return <AbandonedCartsSection />
       default:
         return null
     }

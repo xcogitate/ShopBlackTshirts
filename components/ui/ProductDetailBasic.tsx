@@ -28,25 +28,44 @@ export default function ProductDetailBasic({ product, relatedProducts }: Props) 
   const gallery = product.images?.length ? product.images : [product.image]
   const [active, setActive] = useState(0)
   const [size, setSize] = useState<Product["sizes"][number] | undefined>(product.sizes?.[0])
-  const { addItem } = useCart()
+  const { addItem, siteDiscounts } = useCart()
   const [buying, setBuying] = useState(false)
   const [buyError, setBuyError] = useState<string | null>(null)
   const [shareHref, setShareHref] = useState("")
 
-  const discount =
-    product.originalPrice > product.price
-      ? Math.max(0, Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100))
-      : 0
+  const derivePricing = (p: Product) => {
+    const baseOriginal = Number(p.originalPrice ?? p.price ?? 0)
+    const basePrice = Number(p.price ?? baseOriginal)
+    const limitedActive = p.limited && siteDiscounts.limitedActive
+    const rate = !p.limited ? siteDiscounts.nonLimitedRate : 0
+    const displayBase =
+      p.limited && !limitedActive && baseOriginal > 0 ? baseOriginal : basePrice
+    const effective =
+      !p.limited && rate > 0
+        ? Math.max(0, Math.round(displayBase * (1 - rate) * 100) / 100)
+        : displayBase
+    const percent =
+      (!p.limited && rate > 0 && baseOriginal > 0) || (limitedActive && baseOriginal > 0)
+        ? Math.max(0, Math.round(((baseOriginal - effective) / baseOriginal) * 100))
+        : 0
+    return { effective, original: baseOriginal, percent }
+  }
+
+  const pricing = derivePricing(product)
+  const baseOriginal = pricing.original
+  const effectivePrice = pricing.effective
+  const discount = pricing.percent
 
   const handleAddToCart = () => {
     const sizeSuffix = size ? `-${size}` : ""
     addItem({
       id: `${product.slug}${sizeSuffix}`,
       name: size ? `${product.name} (${size})` : product.name,
-      price: product.price,
-      originalPrice: product.originalPrice,
+      price: effectivePrice,
+      originalPrice: baseOriginal,
       image: gallery[active] ?? product.image,
       slug: product.slug,
+      limited: product.limited,
     })
   }
 
@@ -63,7 +82,7 @@ export default function ProductDetailBasic({ product, relatedProducts }: Props) 
       {
         id: `${product.slug}${sizeSuffix}`,
         name: productName,
-        price: product.price,
+        price: effectivePrice,
         quantity: 1,
         image,
       },
@@ -153,14 +172,14 @@ export default function ProductDetailBasic({ product, relatedProducts }: Props) 
             <header className="space-y-3">
               <h1 className="text-3xl font-extrabold md:text-4xl">{product.name}</h1>
               <div className="flex items-center gap-3">
-                <span className="text-3xl font-bold text-white">${product.price.toFixed(2)}</span>
-                {product.originalPrice > product.price && (
-                  <span className="text-lg text-gray-400 line-through">${product.originalPrice.toFixed(2)}</span>
-                )}
+                <span className="text-3xl font-bold text-white">${effectivePrice.toFixed(2)}</span>
                 {discount > 0 && (
-                  <span className="rounded-full bg-[#F5A623]/20 px-3 py-1 text-xs font-bold text-[#F5A623]">
-                    {discount}% OFF
-                  </span>
+                  <>
+                    <span className="text-lg text-gray-400 line-through">${baseOriginal.toFixed(2)}</span>
+                    <span className="rounded-full bg-[#F5A623]/20 px-3 py-1 text-xs font-bold text-[#F5A623]">
+                      {discount}% OFF
+                    </span>
+                  </>
                 )}
               </div>
               <p className="text-base text-gray-300">{product.description}</p>
@@ -292,14 +311,19 @@ export default function ProductDetailBasic({ product, relatedProducts }: Props) 
                     <img src={related.image} alt={related.name} className="h-56 w-full object-cover" />
                   </div>
                   <h3 className="text-sm font-semibold">{related.name}</h3>
-                  <div className="mt-2 flex items-center gap-2 text-sm text-gray-400">
-                    <span className="text-lg font-bold text-white">${related.price.toFixed(2)}</span>
-                    {related.originalPrice > related.price && (
-                      <span className="line-through">${related.originalPrice.toFixed(2)}</span>
-                    )}
-                  </div>
-                </Link>
-              ))}
+              <div className="mt-2 flex items-center gap-2 text-sm text-gray-400">
+                {(() => {
+                  const rp = derivePricing(related)
+                  return (
+                    <>
+                      <span className="text-lg font-bold text-white">${rp.effective.toFixed(2)}</span>
+                      {rp.percent > 0 && <span className="line-through">${rp.original.toFixed(2)}</span>}
+                    </>
+                  )
+                })()}
+              </div>
+            </Link>
+          ))}
             </div>
           </div>
         </section>

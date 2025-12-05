@@ -12,14 +12,13 @@ function hrefForProduct(product: Product) {
 }
 
 export default function ProductCard({ product }: { product: Product }) {
-  const { addItem } = useCart()
+  const { addItem, siteDiscounts } = useCart()
   const href = hrefForProduct(product)
 
   const id = (product as unknown as { id?: number | string }).id ?? product.slug
   const image = (product as unknown as { image?: string }).image ?? "/placeholder.svg"
-  const price = Number((product as unknown as { price?: number }).price ?? 0)
-  const originalPrice = Number((product as unknown as { originalPrice?: number }).originalPrice ?? price)
-  const isDiscounted = originalPrice > price
+  const basePrice = Number((product as unknown as { price?: number }).price ?? 0)
+  const baseOriginal = Number((product as unknown as { originalPrice?: number }).originalPrice ?? basePrice)
   const limited = Boolean((product as unknown as { limited?: boolean }).limited)
   const available = (product as unknown as { available?: boolean }).available !== false
   const soldOut = Boolean((product as unknown as { soldOut?: boolean }).soldOut)
@@ -27,16 +26,39 @@ export default function ProductCard({ product }: { product: Product }) {
   const [buying, setBuying] = useState(false)
   const [buyError, setBuyError] = useState<string | null>(null)
 
+  const appliedRate = !limited ? siteDiscounts.nonLimitedRate : 0
+  const limitedActive = limited && siteDiscounts.limitedActive
+  const displayBase = limited
+    ? limitedActive && basePrice > 0
+      ? basePrice
+      : baseOriginal > 0
+        ? baseOriginal
+        : basePrice
+    : basePrice
+  const effectivePrice =
+    !limited && appliedRate > 0
+      ? Math.max(0, Math.round(displayBase * (1 - appliedRate) * 100) / 100)
+      : displayBase
+  const originalPrice = baseOriginal
+  const discountPercentage =
+    !limited && appliedRate > 0 && originalPrice > 0
+      ? Math.max(0, Math.round(((originalPrice - effectivePrice) / originalPrice) * 100))
+      : limitedActive && originalPrice > 0
+        ? Math.max(0, Math.round(((originalPrice - effectivePrice) / originalPrice) * 100))
+        : 0
+  const isDiscounted = discountPercentage > 0
+
   const handleAddToCart = () => {
     if (isOutOfStock) return
     addItem(
       {
         id: String(id),
         name: product.name,
-        price,
-        originalPrice,
+        price: displayBase,
+        originalPrice: baseOriginal,
         image,
         slug: product.slug,
+        limited,
       },
       1,
     )
@@ -62,8 +84,6 @@ export default function ProductCard({ product }: { product: Product }) {
       setBuying(false)
     }
   }
-
-  const discountPercentage = isDiscounted ? Math.max(0, Math.round(((originalPrice - price) / originalPrice) * 100)) : 0
 
   return (
     <div className="group flex h-full flex-col overflow-hidden rounded-3xl border-2 border-[#1F1F1F] bg-[#0B0B0B] transition-colors duration-300 hover:border-[#F5A623]/70 hover:bg-[#131313] focus-within:border-[#F5A623]">
@@ -101,7 +121,7 @@ export default function ProductCard({ product }: { product: Product }) {
             {product.name}
           </Link>
           <div className="flex flex-wrap items-baseline gap-3 text-white">
-            <span className="text-2xl font-bold">${price.toFixed(2)}</span>
+            <span className="text-2xl font-bold">${effectivePrice.toFixed(2)}</span>
             {isDiscounted && <span className="text-sm text-gray-500 line-through">${originalPrice.toFixed(2)}</span>}
           </div>
         </div>

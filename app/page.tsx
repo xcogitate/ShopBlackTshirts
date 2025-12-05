@@ -40,54 +40,6 @@ const countdownFromMilliseconds = (ms: number): Countdown => {
   return { days, hours, minutes, seconds }
 }
 
-const fallbackLimitedProducts: Product[] = [
-  {
-    id: "limited-1",
-    slug: "limited-edition-graphic-tee",
-    name: "Limited Edition Graphic Tee",
-    description:
-      "Premium black t-shirt featuring our exclusive LIMITED EDITION graphic. Made from 100% premium cotton with a comfortable fit.",
-    price: 20.0,
-    originalPrice: 30.0,
-    image: "/limited-edition-model.png",
-    images: ["/limited-edition-model.png"],
-    sizes: ["S", "M", "L", "XL", "2XL"],
-    available: true,
-    categories: ["limited-drop"],
-    limited: true,
-  },
-  {
-    id: "limited-2",
-    slug: "know-your-worth-limited",
-    name: "Know Your Worth Then Add Tax",
-    description:
-      "Confidence-first speckled tee with a bold mantra to keep your standards high. Soft hand-feel, structured fit, and premium detailing throughout.",
-    price: 99.0,
-    originalPrice: 110.0,
-    image: "/know-your-worth.png",
-    images: ["/know-your-worth.png"],
-    sizes: ["S", "M", "L", "XL", "2XL"],
-    available: true,
-    categories: ["limited-drop"],
-    limited: true,
-  },
-  {
-    id: "limited-3",
-    slug: "entrepreneur-mentality-limited",
-    name: "Entrepreneur Mentality",
-    description:
-      "Built for builders. This tee pairs a confident script with everyday durability so you can grind in style and comfort.",
-    price: 99.0,
-    originalPrice: 110.0,
-    image: "/entrepreneur-model.png",
-    images: ["/entrepreneur-model.png"],
-    sizes: ["S", "M", "L", "XL", "2XL"],
-    available: true,
-    categories: ["limited-drop"],
-    limited: true,
-  },
-]
-
 const heroDescriptionFallback =
   "Premium fabrics. Bold graphics. Timeless street edge. Each piece crafted for those who value detail and distinction."
 
@@ -97,7 +49,7 @@ const getProductHref = (product?: Product | null) => {
 }
 
 export default function HomePage() {
-  const { addItem } = useCart()
+  const { addItem, siteDiscounts } = useCart()
   const router = useRouter()
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -105,14 +57,16 @@ export default function HomePage() {
   const [timeLeft, setTimeLeft] = useState<Countdown>(initialCountdown)
   const [countdownLabel, setCountdownLabel] = useState(FALLBACK_COUNTDOWN_LABEL)
   const [countdownActive, setCountdownActive] = useState(true)
-  const { products: storefrontProducts } = useStorefrontProducts()
+  const { products: storefrontProducts, status: productsStatus } = useStorefrontProducts()
 
   // Build hero product set
   const limitedProducts = useMemo(() => {
     const limited = storefrontProducts.filter((product) => product.limited)
-    return limited.length ? limited : fallbackLimitedProducts
+    if (limited.length) return limited
+    // Only use empty when loading/success-no-data; no hardcoded flash
+    return []
   }, [storefrontProducts])
-  const isFallbackHero = limitedProducts === fallbackLimitedProducts
+  const isFallbackHero = false
 
   useEffect(() => {
     if (currentHeroImage >= limitedProducts.length) setCurrentHeroImage(0)
@@ -123,20 +77,29 @@ export default function HomePage() {
     [limitedProducts],
   )
   const featuredProduct = limitedProducts[currentHeroImage] ?? limitedProducts[0] ?? null
-  const heroHref = isFallbackHero ? "/shop" : getProductHref(featuredProduct)
+  const heroHref = featuredProduct ? getProductHref(featuredProduct) : "/shop"
   const heroTitle = featuredProduct?.name ?? "Limited Drop Highlights"
   const heroDescription = featuredProduct?.description ?? heroDescriptionFallback
-  const heroDiscount = useMemo(() => {
-    if (!featuredProduct) return null
-    const price = Number(featuredProduct.price ?? 0)
-    const original = Number(featuredProduct.originalPrice ?? featuredProduct.price ?? 0)
-    if (!Number.isFinite(price) || !Number.isFinite(original) || original <= price || original <= 0) {
-      return null
-    }
-    return Math.max(0, Math.round(((original - price) / original) * 100))
-  }, [featuredProduct])
   const heroSoldOut = Boolean(featuredProduct?.soldOut || featuredProduct?.available === false)
   const canAddFeaturedProduct = Boolean(featuredProduct && !heroSoldOut)
+  const heroPricing = useMemo(() => {
+    if (!featuredProduct) return null
+    const baseOriginal = Number(featuredProduct.originalPrice ?? featuredProduct.price ?? 0)
+    const basePrice = Number(featuredProduct.price ?? baseOriginal)
+    const limitedActive = featuredProduct.limited && siteDiscounts.limitedActive
+    const rate = featuredProduct.limited ? 0 : siteDiscounts.nonLimitedRate
+    const displayBase =
+      featuredProduct.limited && !limitedActive && baseOriginal > 0 ? baseOriginal : basePrice
+    const effective =
+      !featuredProduct.limited && rate > 0
+        ? Math.max(0, Math.round(displayBase * (1 - rate) * 100) / 100)
+        : displayBase
+    const percent =
+      ((!featuredProduct.limited && rate > 0 && baseOriginal > 0) || (limitedActive && baseOriginal > 0))
+        ? Math.max(0, Math.round(((baseOriginal - effective) / baseOriginal) * 100))
+        : 0
+    return { effective, original: baseOriginal, percent }
+  }, [featuredProduct, siteDiscounts])
 
   useEffect(() => {
     let mounted = true
@@ -203,10 +166,10 @@ export default function HomePage() {
         ))}
         {/* Spacer to preserve layout */}
         <img src={heroImages[0]} alt="" className="h-full w-full object-cover opacity-0" />
-        {heroDiscount !== null && !heroSoldOut && (
+        {heroPricing?.percent !== undefined && heroPricing.percent > 0 && !heroSoldOut && (
           <div className="absolute right-6 top-6 flex h-28 w-28 items-center justify-center rounded-full bg-red-500 text-center font-bold text-white shadow-lg sm:h-32 sm:w-32">
             <div>
-              <div className="text-3xl">{heroDiscount}%</div>
+              <div className="text-3xl">{heroPricing.percent}%</div>
               <div className="text-sm uppercase tracking-widest">Off</div>
             </div>
           </div>
@@ -273,6 +236,7 @@ export default function HomePage() {
         originalPrice: product.originalPrice ?? product.price,
         image: product.image,
         slug: product.slug,
+        limited: (product as { limited?: boolean }).limited ?? false,
       },
       1,
     )

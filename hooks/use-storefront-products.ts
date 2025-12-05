@@ -6,7 +6,7 @@ import { products as fallbackProducts, type Product } from "@/lib/products"
 type FetchState = "idle" | "loading" | "success" | "error"
 
 export function useStorefrontProducts() {
-  const [products, setProducts] = useState<Product[]>(fallbackProducts)
+  const [products, setProducts] = useState<Product[]>([])
   const [status, setStatus] = useState<FetchState>("idle")
   const [error, setError] = useState<string | null>(null)
 
@@ -25,6 +25,9 @@ export function useStorefrontProducts() {
         const data = (await response.json().catch(() => null)) as { items?: Product[] } | null
         if (isMounted && Array.isArray(data?.items) && data.items.length) {
           setProducts(data.items)
+        } else if (isMounted && status !== "loading") {
+          // if no items returned, keep empty and mark success
+          setProducts([])
         }
         if (isMounted) setStatus("success")
       } catch (fetchError) {
@@ -32,6 +35,8 @@ export function useStorefrontProducts() {
         if (isMounted) {
           setStatus("error")
           setError(fetchError instanceof Error ? fetchError.message : "Failed to load products.")
+          // As a last resort on error, show static fallback to avoid empty screens
+          setProducts(fallbackProducts)
         }
       }
     }
